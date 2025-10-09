@@ -1,7 +1,7 @@
 {
   "name": "vsse",
-  "version": "0.1.3",
-  "description": "Lightweight SSE manager with single-connection multiplexing and per-request POST options.",
+  "version": "0.1.5",
+  "description": "Lightweight SSE manager with single-connection multiplexing and per-request POST options. Now supports custom headers for SSE connections via event-source-polyfill.",
   "type": "module",
   "main": "src/index.js",
   "module": "src/index.js",
@@ -16,8 +16,22 @@
     "test": "node test/run-tests.js"
   },
   "sideEffects": false,
-  "keywords": ["sse", "eventsource", "stream", "client", "post", "requestId"],
+  "keywords": [
+    "sse",
+    "eventsource",
+    "stream",
+    "client",
+    "post",
+    "requestId",
+    "headers",
+    "polyfill"
+  ],
   "author": "",
   "license": "MIT",
-  "files": ["src"]
+  "files": [
+    "src"
+  ],
+  "dependencies": {
+    "event-source-polyfill": "^1.0.31"
+  }
 }

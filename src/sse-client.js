@@ -1,8 +1,10 @@
 /**
  * vsse - Very Simple SSE client with single-connection multiplexing
  * 中文注释：统一 SSE 长连接 + POST 发起与回调分发；支持全局/单次 POST 配置；
- * 浏览器端使用 EventSource（注意：连接本身不支持自定义 headers）。
+ * 浏览器端使用 EventSource（支持自定义 headers via event-source-polyfill）。
  */
+
+import { EventSourcePolyfill } from 'event-source-polyfill';
 
 /**
  * @typedef {('progress'|'done'|'error'|'ping'|string)} SSEEventName
@@ -45,6 +47,7 @@
  * @property {boolean=} withHeartbeat        // 是否启用心跳监测，默认 true
  * @property {number=} expectedPingInterval  // 预期心跳周期（ms），默认 15_000
  * @property {boolean=} sseWithCredentials   // SSE 是否携带 Cookie，默认 false；跨域未允许凭据时建议保持 false
+ * @property {Record<string,string>=} sseHeaders // SSE 连接自定义请求头（需要 event-source-polyfill 支持）
  * @property {number=} maxListeners          // 防泄漏保护，默认 1000
  * @property {{ baseMs:number, maxMs:number, factor:number, jitter:number }=} reconnectBackoff
  */
@@ -247,9 +250,25 @@ export class SSEClient {
     if (!url) return;
 
     try {
-      // 默认不携带 Cookie，只有显式开启时才带
-      const withCred = this.opts.sseWithCredentials === true;
-      this.es = new EventSource(url, { withCredentials: withCred });
+      // 构建 EventSourcePolyfill 配置选项
+      const config = {
+        withCredentials: this.opts.sseWithCredentials === true,
+      };
+
+      // 如果有自定义请求头或认证 token，添加到配置中
+      if (this.opts.sseHeaders || this.opts.token) {
+        config.headers = {
+          ...(this.opts.sseHeaders || {}),
+        };
+
+        // 如果设置了全局 token，自动添加 Authorization 头
+        if (this.opts.token) {
+          config.headers['Authorization'] = `Bearer ${this.opts.token}`;
+        }
+      }
+
+      // 使用 EventSourcePolyfill 支持自定义请求头
+      this.es = new EventSourcePolyfill(url, config);
     } catch (e) {
       this.scheduleReconnect('ctor failed');
       return;

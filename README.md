@@ -3,7 +3,13 @@
 Lightweight front-end SSE manager with single-connection multiplexing.
 
 中文简介：统一 SSE 长连接、多任务共享；POST 发起任务并通过 requestId 路由 SSE 消息到对应回调；
-支持全局与单次 POST 配置（headers/timeout/credentials/token）。
+支持全局与单次 POST 配置（headers/timeout/credentials/token）；**现已支持 SSE 连接自定义请求头**。
+
+## 新特性 ✨
+
+- **SSE 连接自定义请求头**: 通过 `event-source-polyfill` 支持在 SSE 连接中使用自定义请求头
+- **自动认证头注入**: 设置 `token` 后自动为 SSE 连接添加 `Authorization: Bearer <token>` 头
+- **向下兼容**: 原有 API 完全兼容，新功能为可选配置
 
 ## 安装
 
@@ -11,128 +17,140 @@ Lightweight front-end SSE manager with single-connection multiplexing.
 - npm i vsse
 ```
 
+**注意**: 从 v0.1.4 开始，vsse 使用 `event-source-polyfill` 来支持 SSE 连接的自定义请求头功能。
+
 ## 快速开始
+
+### 基础用法（与之前完全兼容）
 ```js
-import { SSEClient } from "vsse"; // 或相对路径 ./src/index.js
+import { SSEClient } from "vsse";
 
 const sse = new SSEClient({
-  url: "/sse?userId=alice",           // 必填：SSE 服务地址（可带查询参数）
-  eventName: "notify",                // 可选：服务端自定义事件名；默认 'message'，若后端发 'notify'，在此指定
-
-  // 空闲与心跳（常用）
-  idleTimeout: 30_000,                // 可选：仅当“无任何监听器”时，空闲多久自动断开（ms）；设 0 可关闭空闲断开
-  withHeartbeat: true,                // 可选：默认 true；启用心跳检测（任意消息或 event=ping 视为“活动”）
-  expectedPingInterval: 15_000,       // 可选：默认 15_000ms；若 2×该值内未收到“任何消息/心跳”，将发起重连
-
-  // POST 全局默认（连接本身不带自定义 headers）
-  defaultHeaders: { "X-App-Version": "1.0.0" }, // 可选：POST 默认请求头（SSE 连接本身不支持自定义 headers）
-  defaultTimeout: 10_000,             // 可选：POST 默认超时（ms），可被单次调用覆盖
-  credentials: "include",            // 可选：POST 默认凭据（include/same-origin/omit）
-  token: "your-jwt-token",           // 可选：POST 默认 Authorization: Bearer <token>
+  url: "/sse?userId=alice",
+  eventName: "notify",
+  idleTimeout: 30_000,
+  withHeartbeat: true,
+  expectedPingInterval: 15_000,
 });
 
-// 发起 POST 并监听 SSE（第四个参数为单次配置，可覆盖默认）
 const { requestId, unsubscribe } = await sse.postAndListen(
   "/api/doA",
   { foo: "bar" },
   ({ phase, type, payload }) => {
-    // 推荐服务端形态：顶层包含 type，正文在 payload.content
-    // 例如：progress + type='need' | 'chat'
-    if (phase === 'progress' && type === 'need') {
-      // 渲染需求卡片（HTML/Markdown），内容在 payload.content
-    } else if (phase === 'progress' && type === 'chat') {
-      // 流式文本分片，内容在 payload.content
-    } else if (phase === 'done') {
-      // 流结束
-    } else if (phase === 'error') {
-      // 错误
+    if (phase === 'progress' && type === 'chat') {
+      // 处理流式文本
     }
-  },
-  {
-    timeout: 5000,
-    headers: { "X-Debug": "true" },
-    token: "special-task-token",
   }
 );
-
-// 手动取消前端监听（可选）
-unsubscribe();
 ```
 
-### 回调参数：完整透传（不丢字段）
-- 自 vX.Y.Z（未发布，见 [Unreleased]）起，回调将收到服务端消息的“完整顶层字段”，包括但不限于：
-  - event、payload、type、code、message、sentAt、seq、total、meta、以及其他自定义字段。
-- 你可以直接根据 type/code 等进行分发或埋点，无需二次组装。
-
-示例：
+### 新功能：SSE 连接自定义请求头
 ```js
-sse.postAndListen('/api/task', { q: 'hi' }, (msg) => {
-  // msg 形如：{ event:'progress', type:'chunk', payload:{ content:'...' }, code:123, sentAt: 1726450000000, extra:'x' }
-  if (msg.phase === 'progress' && msg.type === 'chunk') {
-    render(msg.payload?.content);
-  }
-  if (msg.phase === 'done') {
-    console.log('耗时(ms)=', Date.now() - (msg.sentAt ?? Date.now()));
-  }
-});
-```
-
----
-
-## 最小配置示例（行尾含中文注释）
-```js
-import { SSEClient } from 'vsse';
+import { SSEClient } from "vsse";
 
 const sse = new SSEClient({
-  url: '/sse?userId=alice',           // 必填：SSE 服务地址（可带查询参数）
-  eventName: 'notify',                // 可选：后端自定义事件名；默认 'message'；若服务端发 'notify'，在此指定
+  url: "/sse?userId=alice",
+  eventName: "notify",
 
-  // 空闲与心跳（常用）
-  idleTimeout: 30_000,                // 可选：仅当“无任何监听器”时空闲多久自动断开（ms）；设 0 可关闭空闲断开
-  withHeartbeat: true,                // 可选：默认 true；启用心跳检测（任意消息或 event=ping 视为“活动”）
-  expectedPingInterval: 15_000,       // 可选：默认 15_000ms；若 2×该值内未收到“任何消息/心跳”，将发起重连
+  // ✨ 新增：SSE 连接自定义请求头
+  sseHeaders: {
+    "X-API-Key": "your-api-key",
+    "X-Client-Version": "1.0.0",
+    "X-User-Agent": "MyApp/1.0"
+  },
 
-  // POST 全局默认（连接本身不带自定义 headers）
-  defaultHeaders: { 'X-App': 'demo' },// 可选：POST 默认请求头（SSE 连接不支持自定义 headers）
-  defaultTimeout: 10_000,             // 可选：POST 默认超时（ms），可被单次调用覆盖
-  credentials: 'include',             // 可选：POST 默认凭据（include/same-origin/omit）
-  token: 'your-jwt-token',            // 可选：POST 默认 Authorization: Bearer <token>
+  // ✨ 新增：全局 token 自动注入到 SSE 连接
+  token: "your-jwt-token", // 自动添加 Authorization: Bearer <token> 到 SSE 连接
+
+  // 其他原有配置保持不变
+  idleTimeout: 30_000,
+  withHeartbeat: true,
+  expectedPingInterval: 15_000,
+});
+
+// 使用方式完全不变
+const { requestId, unsubscribe } = await sse.postAndListen(
+  "/api/chat",
+  { message: "Hello" },
+  ({ phase, type, payload }) => {
+    if (phase === 'progress' && type === 'chat') {
+      console.log('收到消息:', payload.content);
+    }
+  }
+);
+```
+
+### 适用场景示例
+
+**场景1：需要 API Key 认证的 SSE 连接**
+```js
+const sse = new SSEClient({
+  url: "/api/sse/stream",
+  sseHeaders: {
+    "X-API-Key": process.env.API_KEY
+  }
 });
 ```
 
-## 完整配置清单（含默认值与行为说明）
+**场景2：跨域 SSE 连接需要自定义头部**
 ```js
-import { SSEClient } from 'vsse';
+const sse = new SSEClient({
+  url: "https://api.example.com/sse",
+  sseHeaders: {
+    "Origin": "https://myapp.com",
+    "X-Requested-With": "XMLHttpRequest"
+  },
+  sseWithCredentials: true
+});
+```
 
+**场景3：微服务架构中的服务间认证**
+```js
+const sse = new SSEClient({
+  url: "/internal/sse",
+  token: await getServiceToken(), // JWT token
+  sseHeaders: {
+    "X-Service-Name": "frontend-client",
+    "X-Trace-ID": generateTraceId()
+  }
+});
+```
+
+## 完整配置清单（包含新增选项）
+```js
 const sse = new SSEClient({
   // ========== 连接与事件 ==========
   url: '/sse?userId=alice',            // 必填：SSE 服务地址
   eventName: 'message',                // 默认 'message'；若服务端使用 'notify'，改为 'notify'
 
-  // ========== 空闲与心跳 ==========
-  idleTimeout: 30_000,                 // 默认 30_000ms；仅在“没有任何监听器”时按此关闭；设 0 关闭空闲断开
-  withHeartbeat: true,                 // 默认 true；启用心跳监测（收到任意消息或 event=ping 视为心跳）
-  expectedPingInterval: 15_000,        // 默认 15_000ms；超时判定为 2×该值内未收到任何消息⇒重连
+  // ========== SSE 连接配置（新增） ==========
+  sseHeaders: {                        // ✨ 新增：SSE 连接自定义请求头
+    'X-API-Key': 'your-api-key',
+    'X-Client-Version': '1.0.0'
+  },
+  token: 'your-jwt-token',             // ✨ 增强：token 现在也会自动添加到 SSE 连接
+  sseWithCredentials: false,           // 默认 false；SSE 连接是否携带 Cookie
 
-  // ========== 凭据与安全 ==========
-  sseWithCredentials: false,           // 默认 false；SSE 连接是否携带 Cookie；跨域需后端返回 ACAC 且精确 ACAO
+  // ========== 空闲与心跳 ==========
+  idleTimeout: 30_000,                 // 默认 30_000ms；仅在"没有任何监听器"时按此关闭
+  withHeartbeat: true,                 // 默认 true；启用心跳监测
+  expectedPingInterval: 15_000,        // 默认 15_000ms；超时判定为 2×该值内未收到消息⇒重连
 
   // ========== POST 全局默认（单次可覆盖） ==========
   defaultHeaders: {                    // 可选：POST 默认请求头
-    'Content-Type': 'application/json',// 库会设置；可自定义再合并/覆盖
+    'Content-Type': 'application/json',
     'X-App': 'demo',
   },
-  defaultTimeout: 10_000,              // 默认 10_000ms；POST 超时，可被单次 options.timeout 覆盖
-  credentials: 'include',              // 默认 undefined；POST 凭据（include/same-origin/omit）
-  token: undefined,                    // 默认 undefined；POST 默认 Authorization: Bearer <token>
+  defaultTimeout: 10_000,              // 默认 10_000ms；POST 超时
+  credentials: 'include',              // 默认 undefined；POST 凭据
 
   // ========== 连接保护与重连 ==========
-  maxListeners: 1000,                  // 默认 1000；监听器数量上限，防内存泄漏
+  maxListeners: 1000,                  // 默认 1000；监听器数量上限
   reconnectBackoff: {                  // 指数退避 + 抖动
-    baseMs: 1000,                      // 起始基准延迟（ms）
-    maxMs: 15_000,                     // 最大延迟（ms）
-    factor: 1.8,                       // 指数因子
-    jitter: 0.3,                       // 抖动比例 [0,1]，避免雪崩
+    baseMs: 1000,
+    maxMs: 15_000,
+    factor: 1.8,
+    jitter: 0.3,
   },
 });
 ```
@@ -280,50 +298,59 @@ event: notify
 data: {"requestId":"<uuid>","phase":"done","payload":{"content":"完整文本","length":1234}}
 ```
 
-## CORS、凭据与 EventSource 限制
-- EventSource 连接不支持自定义请求头，也无法直接携带 Authorization。Authorization 仅对 POST 生效。
-- 如需让连接层携带 Cookie，设置 sseWithCredentials=true，且服务端必须：
+## CORS、凭据与自定义请求头支持
+- **✨ 新特性**: 通过 `event-source-polyfill`，vsse 现已支持 SSE 连接的自定义请求头，包括 `Authorization` 头！
+- **SSE 连接认证**: 可通过 `sseHeaders` 或 `token` 配置直接在 SSE 连接中携带认证信息：
+  ```js
+  const sse = new SSEClient({
+    url: '/sse',
+    token: 'your-jwt-token',           // 自动添加 Authorization: Bearer <token>
+    sseHeaders: {                      // 或者手动设置其他认证头
+      'X-API-Key': 'your-api-key'
+    }
+  });
+  ```
+- **Cookie 支持**: 如需让连接层携带 Cookie，设置 `sseWithCredentials=true`，且服务端必须：
   - Access-Control-Allow-Origin: 精确来源（不能是 *）
   - Access-Control-Allow-Credentials: true
-- 如必须在连接层做 Bearer 鉴权：
-  - 方案 A：使用基于 Cookie 的会话；
-  - 方案 B：改用 fetch + ReadableStream 自行解析 SSE（本库当前未内置该模式）。
+- **跨域自定义头**: 使用自定义请求头时，服务端需要在 CORS 配置中允许相应的头部：
+  ```
+  Access-Control-Allow-Headers: Authorization, X-API-Key, X-Client-Version, ...
+  ```
+- **认证方案选择**:
+  - 方案 A：**Bearer Token**（推荐）：使用 `token` 或 `sseHeaders['Authorization']`
+  - 方案 B：**API Key**：使用 `sseHeaders` 设置自定义认证头
+  - 方案 C：**Cookie 会话**：使用 `sseWithCredentials=true`
 
 ## 常见问题（FAQ）
-- 为什么我设置的 expectedPingInterval 和“实际断开/重连间隔”不一致？
+- 为什么我设置的 expectedPingInterval 和"实际断开/重连间隔"不一致？
   - 判定超时阈值是 2×expectedPingInterval；再加上定时检测步进（5s）与退避延迟，肉眼观测会更长。
 - 为什么连接会自动断开？
   - 可能因为：心跳超时；网络 offline；服务端关闭；无监听器且达到 idleTimeout。
-- 如何关闭“无监听器时”的空闲断开？
+- 如何关闭"无监听器时"的空闲断开？
   - 将 idleTimeout 设为 0。
-- 为什么看不到 SSE 连接上的 Authorization 头？
-  - EventSource 限制所致。Authorization 仅用于 POST；连接层鉴权请用 Cookie 或自实现流式解析。
+- **✨ 新问题**: SSE 连接的自定义请求头不生效？
+  - 确认服务端 CORS 配置允许相应的头部：`Access-Control-Allow-Headers: Authorization, X-API-Key, ...`
+  - 检查服务端是否正确读取了自定义头部
+  - 确认使用的是 vsse v0.1.4+ 版本
+- **✨ 新问题**: Bearer Token 认证失败？
+  - 确认 token 格式正确，不需要手动添加 "Bearer " 前缀
+  - 检查服务端是否正确验证 Authorization 头
+  - 可以通过浏览器开发者工具的网络面板确认请求头是否正确发送
 - 跨域携带 Cookie 不生效？
   - 检查服务端是否返回 Access-Control-Allow-Credentials: true 且 Access-Control-Allow-Origin 为精确源而非 *。
+- **✨ 新问题**: 同时使用 token 和 sseHeaders 中的 Authorization 会怎样？
+  - `token` 配置的优先级更高，会覆盖 `sseHeaders` 中的 Authorization 头
 
-## 排查清单（出现“时断时续/延迟重连”时）
+## 排查清单（出现"时断时续/延迟重连"时）
 - 服务端是否按期发送心跳（或至少有业务消息）？
 - eventName 是否与服务端一致（message vs notify）？
-- 是否考虑了“2×expectedPingInterval + 5s 检查步进 + 退避延迟”的综合效果？
+- 是否考虑了"2×expectedPingInterval + 5s 检查步进 + 退避延迟"的综合效果？
 - 标签页是否在后台导致节流？
 - 是否在大量任务场景触及 maxListeners 限制？
-
-## 多任务复用与懒连接
-- 仅当存在至少一个监听器时才建立 SSE 连接（懒连接），包括按 requestId 的监听器与全局监听器。
-- 多个 postAndListen 共享同一连接，通过 requestId 路由到各自回调；无 requestId 的消息会被 onBroadcast(cb) 接收。
-
-```js
-const a = await sse.postAndListen('/api/a', {...}, onA);
-const b = await sse.postAndListen('/api/b', {...}, onB);
-
-// 取消其中一个
-a.unsubscribe();
-// 若全部取消且达到 idleTimeout，将自动关闭连接
-```
-
-## 提交到仓库的 PR 建议（仅文档增强）
-- Commit（Conventional Commits）：
-  - docs(vsse): expand README with heartbeat/backoff/credentials and usage examples
-- CHANGELOG（vsse/CHANGELOG.md → [Unreleased]）：
-  - Added — Expanded README: heartbeat, backoff, sseWithCredentials, per-call overrides, lifecycle, FAQ
-- 版本：不涉及行为变更，可作为文档更新并入后续发版（无须立即改版本号）。
+- **✨ 新增排查项**: 使用自定义请求头时的额外检查：
+  - 服务端 CORS 配置是否正确允许自定义头部？
+  - 认证 token 是否已过期或格式错误？
+  - 是否因为认证失败导致服务端拒绝连接？
+  - 浏览器开发者工具中是否显示 401/403 等认证错误？
+  - 跨域场景下是否正确配置了 `Access-Control-Allow-Headers`？

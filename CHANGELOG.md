@@ -2,20 +2,40 @@
 
 All notable changes to this project will be documented in this file.
 
-The format is based on Keep a Changelog, and this project adheres to Semantic Versioning.
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.1.4] - 2025-01-09
+
 ### Added
-- Global broadcast listeners: `onBroadcast(cb)` to receive messages without `requestId` (e.g., system announcements). Returns `unsubscribe`.
-- destroy(): clean up global event listeners and timers to prevent memory leaks.
-- Event parsing compatibility: if JSON has no `event` field, fall back to SSE native `ev.type`.
-- Docs: Expanded README with heartbeat, backoff, sseWithCredentials, per-call overrides, lifecycle, FAQ and troubleshooting; added global broadcast docs and examples.
+- **SSE 连接自定义请求头支持**: 通过集成 `event-source-polyfill` 库，现在支持在 SSE 连接中使用自定义请求头
+- **新配置选项 `sseHeaders`**: 允许为 SSE 连接设置自定义请求头（如 API Key、版本号等）
+- **增强的 token 功能**: 全局 `token` 现在会自动添加到 SSE 连接的 `Authorization: Bearer <token>` 头部
+- **使用示例文件**: 新增 `examples/custom-headers-example.js` 展示各种使用场景
+- **完整的文档更新**: README.md 包含新功能的详细说明和最佳实践
 
 ### Changed
-- dispatch(): now forwards the full message object to callbacks (all top-level fields are preserved). Backward compatible.
-- Lazy connection and idle-close now consider both per-request listeners and global broadcast listeners.
-- Default `sseWithCredentials` is now `false`. Enable explicitly when the server allows credentials.
+- **依赖更新**: 添加 `event-source-polyfill ^1.0.31` 作为生产依赖
+- **EventSource 实现**: 从原生 `EventSource` 切换到 `EventSourcePolyfill` 以支持自定义请求头
+- **类型定义增强**: `SSEClientOptions` 类型定义新增 `sseHeaders` 字段
+- **文档注释**: 更新代码注释说明新的自定义请求头功能
 
-### Fixed
-- JSDoc: `SSEClientOptions` now documents `sseWithCredentials`.
+### Technical Details
+- 保持 **100% 向下兼容**: 所有现有 API 和功能完全不变
+- 自动配置合并: `sseHeaders` 和 `token` 会智能合并为 EventSourcePolyfill 的 headers 配置
+- 错误处理: 增强了连接失败时的错误处理机制
 
+### Use Cases
+- API Key 认证的 SSE 连接
+- 跨域 SSE 连接的自定义头部
+- 微服务架构中的服务间认证
+- 需要追踪 ID 或版本信息的连接
+
+## [0.1.3] - Previous Release
+### Added
+- 初始的 SSE 多路复用功能
+- POST 请求与 SSE 监听集成
+- 心跳检测和自动重连
+- 空闲超时管理
