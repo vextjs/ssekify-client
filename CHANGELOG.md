@@ -26,6 +26,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **增强错误处理**: 连接失败时会释放连接锁并正确设置状态
 - **日志输出标准化**: 所有日志使用 `[vsse]` 前缀，便于过滤和调试
 
+### Documentation
+- **sseKify 集成说明**: 在 README.md 开头添加 sseKify 的关联说明，明确它是推荐的服务端配套工具
+- **详细协同指南**: 新增"与 sseKify 协同（postAndListen 模式）"章节，包含：
+  - 架构模式说明（前后端职责）
+  - 5个关键协同要点（事件名、requestId、生命周期、跨实例部署、心跳配置）
+  - 完整的前后端示例代码（旅行规划场景）
+  - 参考资源链接
+
 ### Fixed
 - **防止重复连接**: 同一个实例多次调用 `connect()` 或 `onBroadcast()` 只会建立一个连接
 - **防止竞态条件**: 并发调用连接方法时不会产生多个连接

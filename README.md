@@ -5,6 +5,8 @@ Lightweight front-end SSE manager with single-connection multiplexing.
 中文简介：统一 SSE 长连接、多任务共享；POST 发起任务并通过 requestId 路由 SSE 消息到对应回调；
 支持全局与单次 POST 配置（headers/timeout/credentials/token）；**现已支持 SSE 连接自定义请求头**。
 
+> **配套服务端**: vsse 是**前端 SSE 客户端**，推荐与 [sseKify](https://www.npmjs.com/package/ssekify)（Node.js 服务端 SSE 工具）配合使用。sseKify 提供跨实例分发、房间管理、心跳保活、重放缓冲等能力，与 vsse 的 `postAndListen` 模式完美协同。
+
 ## 📖 目录
 
 - [新特性](#新特性-)
@@ -22,6 +24,7 @@ Lightweight front-end SSE manager with single-connection multiplexing.
   - [公开方法](#公开方法)
 - [全局广播（onBroadcast）](#全局广播onbroadcast)
 - [服务端事件格式与路由约定](#服务端事件格式与路由约定)
+  - [与 sseKify 协同（postAndListen 模式）](#与-ssekify-协同postandlisten-模式)
 - [CORS、凭据与自定义请求头支持](#cors凭据与自定义请求头支持)
 - [防重复连接保护](#防重复连接保护-)
 - [常见问题（FAQ）](#常见问题faq)
@@ -485,6 +488,206 @@ data: {"requestId":"<uuid>","phase":"progress","type":"chat","payload":{"content
 event: notify
 data: {"requestId":"<uuid>","phase":"done","payload":{"content":"完整文本","length":1234}}
 ```
+
+### 与 sseKify 协同（postAndListen 模式）
+
+vsse 与 [sseKify](https://www.npmjs.com/package/ssekify) 是配套设计的前后端 SSE 解决方案：
+
+**架构模式**：
+- **前端（vsse）**：管理单个 SSE 长连接，通过 `postAndListen` 发起任务并订阅结果
+- **服务端（sseKify）**：接收连接、跨实例分发、按 `requestId` 路由消息到对应用户
+
+**协同要点**：
+
+1. **事件名一致**：
+   ```js
+   // 前端
+   const sse = new SSEClient({ 
+     url: '/sse?userId=alice', 
+     eventName: 'notify'  // 必须与服务端一致
+   });
+   
+   // 服务端（sseKify）
+   sse.sendToUser('alice', data, { event: 'notify' });
+   ```
+
+2. **requestId 对齐**：
+   ```js
+   // 前端发起
+   const { requestId } = await sse.postAndListen(
+     '/api/chat',
+     { message: 'Hello' },
+     (msg) => console.log(msg)
+   );
+   
+   // 服务端发送（data 必须包含 requestId）
+   await sse.publish(
+     { 
+       requestId,  // 与前端一致
+       phase: 'progress', 
+       type: 'chat',
+       payload: { content: 'chunk...' }
+     }, 
+     userId, 
+     { event: 'notify' }
+   );
+   ```
+
+3. **生命周期阶段**：
+   ```js
+   // 进度中
+   await sse.publish({ 
+     requestId, 
+     phase: 'progress',  // vsse 持续接收
+     type: 'chat',
+     payload: { content: chunk }
+   }, userId, { event: 'notify' });
+   
+   // 完成（vsse 自动取消该 requestId 的监听）
+   await sse.publish({ 
+     requestId, 
+     phase: 'done',
+     payload: { content: fullText }
+   }, userId, { event: 'notify' });
+   
+   // 错误（vsse 自动取消该 requestId 的监听）
+   await sse.publish({ 
+     requestId, 
+     phase: 'error',
+     error: { code: 'TIMEOUT', message: '请求超时' }
+   }, userId, { event: 'notify' });
+   ```
+
+4. **跨实例部署**：
+   ```js
+   // 服务端使用 Redis 实现跨实例分发
+   const sse = new SSEKify({
+     redis: createIORedisAdapter(process.env.REDIS_URL),
+     channel: 'ssekify:bus'
+   });
+   
+   // 入口服务：接收 SSE 连接
+   app.get('/sse', (req, res) => {
+     const userId = req.query.userId;
+     sse.registerConnection(userId, res);
+   });
+   
+   // 业务服务：处理任务并发布消息（自动路由到持有连接的实例）
+   app.post('/api/chat', async (req, res) => {
+     const { requestId, message } = req.body;
+     // 处理业务...
+     await sse.publish({ 
+       requestId, 
+       phase: 'progress',
+       payload: { content: chunk }
+     }, userId, { event: 'notify' });
+   });
+   ```
+
+5. **心跳配置对齐**：
+   ```js
+   // 前端
+   const client = new SSEClient({
+     expectedPingInterval: 15_000  // 期望 15 秒收到一次心跳
+   });
+   
+   // 服务端
+   const server = new SSEKify({
+     keepAliveMs: 15_000  // 每 15 秒发送一次心跳
+   });
+   ```
+
+**完整示例**：
+
+```js
+// ========== 前端（vsse）==========
+import { SSEClient } from 'vsse';
+
+const sse = new SSEClient({
+  url: '/sse?userId=alice',
+  eventName: 'notify',
+  expectedPingInterval: 15_000
+});
+
+const { requestId, unsubscribe } = await sse.postAndListen(
+  '/api/trip/plan',
+  { from: 'Beijing', to: 'Shanghai' },
+  ({ phase, type, payload }) => {
+    if (phase === 'progress' && type === 'trip.plan') {
+      console.log('规划进度:', payload.percent);
+    } else if (phase === 'done') {
+      console.log('完整方案:', payload.plan);
+    } else if (phase === 'error') {
+      console.error('规划失败:', payload.error);
+    }
+  }
+);
+
+// ========== 服务端（sseKify）==========
+const express = require('express');
+const { SSEKify, createIORedisAdapter } = require('ssekify');
+
+const app = express();
+const sse = new SSEKify({
+  redis: createIORedisAdapter(process.env.REDIS_URL),
+  channel: 'ssekify:bus',
+  keepAliveMs: 15_000
+});
+
+// SSE 连接端点
+app.get('/sse', (req, res) => {
+  const userId = req.query.userId;
+  sse.registerConnection(userId, res);
+});
+
+// 业务端点
+app.post('/api/trip/plan', async (req, res) => {
+  const { requestId, from, to } = req.body;
+  const userId = req.user.id;
+  
+  res.json({ requestId, status: 'processing' });
+  
+  // 异步处理并推送进度
+  (async () => {
+    try {
+      // 进度 1
+      await sse.publish({
+        requestId,
+        phase: 'progress',
+        type: 'trip.plan',
+        payload: { percent: 30, step: '查询路线' }
+      }, userId, { event: 'notify' });
+      
+      // 进度 2
+      await sse.publish({
+        requestId,
+        phase: 'progress',
+        type: 'trip.plan',
+        payload: { percent: 70, step: '计算费用' }
+      }, userId, { event: 'notify' });
+      
+      // 完成
+      await sse.publish({
+        requestId,
+        phase: 'done',
+        payload: { plan: { routes: [...], cost: 350 } }
+      }, userId, { event: 'notify' });
+    } catch (err) {
+      // 错误
+      await sse.publish({
+        requestId,
+        phase: 'error',
+        error: { code: 'PLAN_FAILED', message: err.message }
+      }, userId, { event: 'notify' });
+    }
+  })();
+});
+```
+
+**参考资源**：
+- sseKify 文档：https://www.npmjs.com/package/ssekify
+- sseKify 示例：查看 sseKify 的 `examples/express/` 目录
+- 完整联调：sseKify 提供了 `api.http` 文件用于 IDE 一键测试
 
 ## CORS、凭据与自定义请求头支持
 - **✨ 新特性**: 通过 `event-source-polyfill`，vsse 现已支持 SSE 连接的自定义请求头，包括 `Authorization` 头！
