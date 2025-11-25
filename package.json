@@ -1,5 +1,5 @@
 {
-  "name": "vsse",
+  "name": "ssekify-client",
   "version": "0.2.0",
   "description": "Lightweight SSE manager with single-connection multiplexing, active connection support, and per-request POST options. Now supports custom headers for SSE connections via event-source-polyfill.",
   "type": "module",
